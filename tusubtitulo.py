@@ -1,10 +1,16 @@
+# -*- encoding: utf-8 -*-
+
+
 import difflib
-import re
-import io
 import gzip
+import io
+import re
 from urllib import request
 
+
 import bs4
+import guessit
+
 
 _NETWORK_ENABLED = True
 
@@ -108,6 +114,19 @@ class API:
 
         return ret
 
+    def get_subtitles_from_filename(self, filename):
+        info = guessit.guessit(filename)
+
+        if info['type'] != 'episode':
+            raise ValueError('Invalid episode filename:' + filename)
+
+        for f in 'title season episode'.split():
+            if f not in info or info[f] in (None, ''):
+                raise ValueError('Invalid episode filename:' + filename)
+
+        return self.get_subtitles(
+            info['title'], str(info['season']), str(info['episode']))
+
 
 class ShowInfo:
     def __init__(self, title, id, url):
@@ -148,55 +167,11 @@ class SubtitleInfo:
             version=self.version,
             url=self.url)
 
-#         if fetch is None:
-#             fetch = fetch_url
-#         self._fetch = fetch
-
-#         if self.show is None and self.id is None:
-#             raise ValueError('show or id is needed')
-
-#         if not self.id:
-#             self._get_show_info()
-
-    # def _get_show_info(self):
-    #     url = get_show_url(
-    #         self.show,
-    #         buff=self._fetch(self._SERIES_INDEX))
-
-    #     m = re.match(
-    #         'https://www.tusubtitulo.com/show/(\d+)',
-    #         url,
-    #         flags=re.IGNORECASE)
-    #     if not m:
-    #         raise ShowNotFoundError(self.show)
-
-    #     self.id = m.group(1)
-
-    # def get_episode_subtitles(self, season, episode):
-    #     if season not in self._subtitle_info:
-    #         self.fetch_season_info(season)
-
-    #     return self._subtitle_info[season][episode]
-
-    # def fetch_season_info(self, season):
-    #     season_url = ('https://www.tusubtitulo.com/ajax_loadShow.php?'
-    #                   'show={show_id}&season={season}')
-    #     season_url = season_url.format(show_id=self.id, season=season)
-
-    #     return season_url
-
-
-    # def get_season_subtitles(self, season):
-    #     season_url = self.get_season_url(season)
-    #     subtitles = parse_season_page(self._fetch(season_url))
-
-
 
 class ShowNotFoundError(Exception):
     def __init__(self, series, *args, **kwargs):
         self.show = series
         super().__init__(self, *args, **kwargs)
-
 
 
 #
@@ -209,7 +184,7 @@ def _soupify(buff, encoding='utf-8', parser="html.parser"):
 
 def parse_index_page(buff, asdict=False):
     soup = _soupify(buff)
-    
+
     ret = [
         (x.text, 'https://www.tusubtitulo.com' + x.attrs['href'])
         for x in soup.select('a')
@@ -220,6 +195,7 @@ def parse_index_page(buff, asdict=False):
         ret = {show: url for (show, url) in ret}
 
     return ret
+
 
 def parse_season_page(buff):
     ret = []

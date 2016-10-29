@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+# -*- encoding: utf-8 -*-
+
 
 import unittest
-
-import re
 from os import path
+import re
+
 
 import tusubtitulo
 tusubtitulo._NETWORK_ENABLED = False
@@ -28,11 +30,6 @@ def mock_fetcher(url, headers=None):
         '-',
         url, flags=re.IGNORECASE)[0]
     return read_sample(url)
-
-
-class TestShowInfo(tusubtitulo.ShowInfo):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs, fetch=mock_fetcher)
 
 
 class MockedAPI(tusubtitulo.API):
@@ -101,27 +98,14 @@ class APITest(unittest.TestCase):
         es_ES = [x for x in info if x.language == 'es-ES']
         self.assertEqual(len(es_ES), 3)
 
-# class TuSubtituloTest(unittest.TestCase):
-#     def test_series_finder_exact(self):
-#         info = TestShowInfo('Black Mirror')
-#         self.assertEqual(info.id, '1168')
+    def test_from_filename(self):
+        info = self.api.get_subtitles_from_filename(
+            'American Horror Story 5x03 - Mommy.mkv')
+        self.assertEqual(len(info), 5)
 
-#     def test_series_finder_lower(self):
-#         info = TestShowInfo('z nation')
-#         self.assertEqual(info.id, '2201')
+        es_ES = [x for x in info if x.language == 'es-ES']
+        self.assertEqual(len(es_ES), 3)
 
-#     def test_series_finder_similar_1(self):
-#         info = TestShowInfo('Hawaii Five 0')
-#         self.assertEqual(info.id, '695')
-
-#     def test_series_finder_similar_2(self):
-#         info = TestShowInfo('mad man')
-#         self.assertEqual(info.id, '79')
-
-#     def test_season_info(self):
-#         info = TestShowInfo('American Horror Story', id='1093')
-#         subs = info.get_season_subtitles(5)
-#         print(repr(subs))
 
 if __name__ == '__main__':
     unittest.main()
