@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- encoding: utf-8 -*-
+from __future__ import unicode_literals, print_function
 
 
 import unittest
 from os import path
 import re
-
 
 import tusubtitulo
 tusubtitulo._NETWORK_ENABLED = False
@@ -32,9 +32,9 @@ def mock_fetcher(url, headers=None):
     return read_sample(url)
 
 
-class MockedAPI(tusubtitulo.API):
+class API(tusubtitulo.API):
     def __init__(self, *args, **kwargs):
-        super().__init__(fetch_func=mock_fetcher)
+        super(API, self).__init__(fetch_func=mock_fetcher)
 
 
 class ParsersTest(unittest.TestCase):
@@ -64,7 +64,7 @@ class ParsersTest(unittest.TestCase):
 
 class APITest(unittest.TestCase):
     def setUp(self):
-        self.api = MockedAPI()
+        self.api = API()
 
     def test_exact_match(self):
         info = self.api.get_show('Black Mirror')

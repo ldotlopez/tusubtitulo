@@ -1,11 +1,15 @@
 # -*- encoding: utf-8 -*-
 
 
+# Compatibity stuff
+from __future__ import unicode_literals, print_function
+from six.moves.urllib import request
+
+
 import difflib
 import gzip
 import io
 import re
-from urllib import request
 
 
 import bs4
@@ -21,7 +25,7 @@ SEASON_PAGE_PATTERN = (MAIN_URL +
                        'ajax_loadShow.php?show={show}&season={season}')
 
 
-class API:
+class API(object):
     def __init__(self, fetch_func=None):
         if fetch_func is None:
             fetch_func = fetch_url
@@ -120,7 +124,7 @@ class API:
         if info['type'] != 'episode':
             raise ValueError('Invalid episode filename:' + filename)
 
-        for f in 'title season episode'.split():
+        for f in 'title season episode'.split(' '):
             if f not in info or info[f] in (None, ''):
                 raise ValueError('Invalid episode filename:' + filename)
 
@@ -128,7 +132,7 @@ class API:
             info['title'], str(info['season']), str(info['episode']))
 
 
-class ShowInfo:
+class ShowInfo(object):
     def __init__(self, title, id, url):
         self.title = title
         self.id = id
@@ -140,7 +144,7 @@ class ShowInfo:
         return SERIES_PAGE_PATTERN.format(show=self.id)
 
 
-class SubtitleInfo:
+class SubtitleInfo(object):
     def __init__(self, show, season, ep, version, language, url, title=None):
         self.show = show
         self.season = season
@@ -171,7 +175,7 @@ class SubtitleInfo:
 class ShowNotFoundError(Exception):
     def __init__(self, series, *args, **kwargs):
         self.show = series
-        super().__init__(self, *args, **kwargs)
+        super(ShowNotFoundError, self).__init__(*args, **kwargs)
 
 
 #
@@ -213,7 +217,7 @@ def parse_season_page(buff):
             # Get title
             title = td.text.strip()
             if ' - ' in title:
-                title = title.split(' - ', maxsplit=1)[1]
+                title = title.split(' - ', 1)[1]
 
             # Get episode number
             m = re.search(
@@ -229,7 +233,7 @@ def parse_season_page(buff):
         # Version header
         elif td.attrs.get('colspan', '') == '3':
             curr_version = td.text.strip()
-            curr_version = curr_version.split(' ', maxsplit=1)[1]
+            curr_version = curr_version.split(' ', 1)[1]
             # print("  Version:", curr_version)
 
         elif 'language' in td.attrs.get('class', []):
