@@ -3,17 +3,19 @@
 
 # Compatibity stuff
 from __future__ import unicode_literals, print_function
-from six.moves.urllib import request
 
 
 import difflib
 import gzip
 import io
 import re
+import sys
+from os import path
 
 
 import bs4
 import guessit
+import requests
 
 
 _NETWORK_ENABLED = True
@@ -28,11 +30,11 @@ SEASON_PAGE_PATTERN = (MAIN_URL +
 class API(object):
     def __init__(self, fetch_func=None):
         if fetch_func is None:
-            fetch_func = fetch_url
+            fetch_func = Fetcher().fetch
         self._fetch_func = fetch_func
 
-    def fetch(self, url):
-        return self._fetch_func(url)
+    def fetch(self, url, headers={}):
+        return self._fetch_func(url, headers)
 
     def get_show(self, show):
         def _get_id_from_url(url):
@@ -46,10 +48,13 @@ class API(object):
 
             return m.group(1)
 
+        buff = self.fetch(
+            SERIES_INDEX_URL,
+            {'Referer': MAIN_URL}
+        )
+
         # Search exact match
-        table = parse_index_page(
-            self.fetch(SERIES_INDEX_URL),
-            asdict=True)
+        table = parse_index_page(buff)
         rev = {v: k for (k, v) in table.items()}
 
         if show in table:
@@ -93,9 +98,11 @@ class API(object):
         }
 
         showinfo = self.get_show(show)
-
-        season_data = parse_season_page(self.fetch(
-            SEASON_PAGE_PATTERN.format(show=showinfo.id, season=season)))
+        buff = self.fetch(
+            SEASON_PAGE_PATTERN.format(show=showinfo.id, season=season),
+            {'Referer': showinfo.url}
+        )
+        season_data = parse_season_page(buff)
 
         ret = []
         for (ep, title, version, language, url) in season_data:
@@ -130,6 +137,14 @@ class API(object):
 
         return self.get_subtitles(
             info['title'], str(info['season']), str(info['episode']))
+
+    def fetch_subtitle(self, subtitle_info):
+        headers = {
+            'Referer': SEASON_PAGE_PATTERN.format(
+                show=subtitle_info.show.id,
+                season=subtitle_info.season)
+        }
+        return self.fetch(subtitle_info.url, headers)
 
 
 class ShowInfo(object):
@@ -183,22 +198,18 @@ class ShowNotFoundError(Exception):
 #
 
 def _soupify(buff, encoding='utf-8', parser="html.parser"):
-    return bs4.BeautifulSoup(buff.decode(encoding), parser)
+    # return bs4.BeautifulSoup(buff.decode(encoding), parser)
+    return bs4.BeautifulSoup(buff, parser)
 
 
-def parse_index_page(buff, asdict=False):
+def parse_index_page(buff):
     soup = _soupify(buff)
 
-    ret = [
-        (x.text, 'https://www.tusubtitulo.com' + x.attrs['href'])
+    return {
+        x.text: 'https://www.tusubtitulo.com' + x.attrs['href']
         for x in soup.select('a')
         if x.attrs.get('href', '').startswith('/show/')
-    ]
-
-    if asdict:
-        ret = {show: url for (show, url) in ret}
-
-    return ret
+    }
 
 
 def parse_season_page(buff):
@@ -233,7 +244,9 @@ def parse_season_page(buff):
         # Version header
         elif td.attrs.get('colspan', '') == '3':
             curr_version = td.text.strip()
-            curr_version = curr_version.split(' ', 1)[1]
+            if ' ' in curr_version:
+                curr_version = curr_version.split(' ', 1)[1]
+
             # print("  Version:", curr_version)
 
         elif 'language' in td.attrs.get('class', []):
@@ -267,32 +280,42 @@ def parse_season_page(buff):
 # Network
 #
 
+class Fetcher(object):
+    def __init__(self, headers={}):
+        default_headers = {
+            'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; WOW64) '
+                           'AppleWebKit/537.36 (KHTML, like Gecko) '
+                           'Chrome/50.0.2661.102 Safari/537.36'),
+            'Accept-Language': 'en, en-gb;q=0.9, en-us;q=0.9',
+            'Referer': ''
+        }
 
-def fetch_url(url, headers=None):
-    if not _NETWORK_ENABLED:
-        raise RuntimeError('Network not enabled')
+        self._session = requests.Session()
+        self._session.headers.update(default_headers)
+        self._session.headers.update(headers)
 
-    default_headers = {
-        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; WOW64) '
-                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                       'Chrome/50.0.2661.102 Safari/537.36'),
-        'Accept-Language': 'en, en-gb;q=0.9, en-us;q=0.9'
-    }
+    def fetch(self, url, headers={}):
+        if not _NETWORK_ENABLED:
+            raise RuntimeError('Network not enabled')
 
-    if headers is None:
-        headers = {}
+        resp = self._session.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise Exception('Invalid response')
 
-    for (k, v) in default_headers.items():
-        if k not in headers:
-            headers[k] = v
+        self._session.headers.update({'Referer': url})
 
-    req = request.Request(url, headers=headers)
-    resp = request.urlopen(req)
-    if resp.getheader('Content-Encoding') == 'gzip':
-        bi = io.BytesIO(resp.read())
-        gf = gzip.GzipFile(fileobj=bi, mode="rb")
-        buff = gf.read()
-    else:
-        buff = resp.read()
+        return resp.text
 
-    return buff
+
+def main(filename):
+    api = API()
+    subs = api.get_subtitles_from_filename(path.basename(filename))
+    print(api.fetch_subtitle(subs[0]))
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        print("Usage: {} filename".format(sys.argv[0]))
+        sys.exit(1)
+
+    main(sys.argv[1])

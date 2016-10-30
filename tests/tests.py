@@ -20,11 +20,11 @@ def sample_path(samplename):
 def read_sample(samplename):
     sample = sample_path(samplename)
 
-    with open(sample, 'rb') as fh:
+    with open(sample, 'r') as fh:
         return fh.read()
 
 
-def mock_fetcher(url, headers=None):
+def mock_fetcher(url, headers={}):
     url = re.subn(
         r'[^0-9a-z]',
         '-',
@@ -41,9 +41,7 @@ class ParsersTest(unittest.TestCase):
     def test_series_index_parser(self):
 
         data = tusubtitulo.parse_index_page(
-            mock_fetcher(tusubtitulo.SERIES_INDEX_URL),
-            asdict=True
-        )
+            mock_fetcher(tusubtitulo.SERIES_INDEX_URL))
 
         self.assertEqual(
             data['Black Mirror'],
@@ -106,6 +104,13 @@ class APITest(unittest.TestCase):
         es_ES = [x for x in info if x.language == 'es-ES']
         self.assertEqual(len(es_ES), 3)
 
+    def test_house_5_03(self):
+        info = self.api.get_subtitles_from_filename('house 5x03.avi')
+        self.assertEqual(len(info), 1)
+        self.assertEqual(info[0].version, 'HDTV.XviD-LOL')
+        self.assertEqual(info[0].language, 'es-ES')
+        self.assertEqual(
+            info[0].url, 'https://www.tusubtitulo.com/updated/5/40/0')
 
 if __name__ == '__main__':
     unittest.main()
