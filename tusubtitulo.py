@@ -269,8 +269,9 @@ def fetch_url(url, headers=None):
         raise RuntimeError('Network not enabled')
 
     default_headers = {
-        'User-Agent': ('Mozilla/5.0 (X11; Linux x86) Home software '
-                       '(KHTML, like Gecko)'),
+        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; WOW64) '
+                       'AppleWebKit/537.36 (KHTML, like Gecko) '
+                       'Chrome/50.0.2661.102 Safari/537.36'),
         'Accept-Language': 'en, en-gb;q=0.9, en-us;q=0.9'
     }
 
