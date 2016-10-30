@@ -50,7 +50,7 @@ class API(object):
         buff = self.fetch(
             SERIES_INDEX_URL,
             {'Referer': MAIN_URL}
-        )
+        ).text
 
         # Search exact match
         table = parse_index_page(buff)
@@ -100,7 +100,7 @@ class API(object):
         buff = self.fetch(
             SEASON_PAGE_PATTERN.format(show=showinfo.id, season=season),
             {'Referer': showinfo.url}
-        )
+        ).text
         season_data = parse_season_page(buff)
 
         state = self._fetcher.get_state()
@@ -145,7 +145,7 @@ class API(object):
                 show=subtitle_info.show.id,
                 season=subtitle_info.season)
         }
-        return self.fetch(subtitle_info.url, headers)
+        return self.fetch(subtitle_info.url, headers).text
 
 
 class ShowInfo(object):
@@ -316,7 +316,7 @@ class Fetcher(object):
 
         self._session.headers.update({'Referer': url})
 
-        return resp.text
+        return resp
 
     def get_state(self):
         return {

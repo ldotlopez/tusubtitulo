@@ -39,7 +39,7 @@ class MockFetcher(object):
             r'[^0-9a-z]',
             '-',
             url, flags=re.IGNORECASE)[0]
-        return read_sample(url)
+        return MockResponse(read_sample(url))
 
     def get_state(self):
         return self.state.copy()
@@ -47,6 +47,12 @@ class MockFetcher(object):
     def set_state(self, state):
         self.state = state.copy()
 
+
+class MockResponse(object):
+    def __init__(self, text):
+        self.content = text
+        self.text = text
+        self.encoding = 'utf-8'
 
 class API(tusubtitulo.API):
     def __init__(self, *args, **kwargs):
@@ -59,23 +65,23 @@ class ParsersTest(unittest.TestCase):
     def test_series_index_parser(self):
 
         data = tusubtitulo.parse_index_page(
-            self.fetcher.fetch(tusubtitulo.SERIES_INDEX_URL))
+            self.fetcher.fetch(tusubtitulo.SERIES_INDEX_URL).text)
 
         self.assertEqual(
             data['Black Mirror'],
-            'https://www.tusubtitulo.com/show/1168'
+            'http://www.tusubtitulo.com/show/1168'
         )
 
     def test_season_page_parser(self):
         url = tusubtitulo.SEASON_PAGE_PATTERN.format(show='1093', season='5')
-        data = tusubtitulo.parse_season_page(self.fetcher.fetch(url))
+        data = tusubtitulo.parse_season_page(self.fetcher.fetch(url).text)
 
         self.assertTrue((
             '10',
-            'She Gets Revenge',
-            'WEB-DL',
-            'Español (España)',
-            'https://www.tusubtitulo.com/updated/5/47505/1') in data)
+            'American Horror Story 5x10 - She Gets Revenge',
+            'REPACK KILLERS',
+            'Espa\xf1ol (Espa\xf1a)',
+            'http://www.tusubtitulo.com/updated/5/47505/2') in data)
 
 
 class APITest(unittest.TestCase):
@@ -128,7 +134,7 @@ class APITest(unittest.TestCase):
         self.assertEqual(info[0].version, 'HDTV.XviD-LOL')
         self.assertEqual(info[0].language, 'es-es')
         self.assertEqual(
-            info[0].url, 'https://www.tusubtitulo.com/updated/5/40/0')
+            info[0].url, 'http://www.tusubtitulo.com/updated/5/40/0')
 
 
 class FetcherTest(unittest.TestCase):
