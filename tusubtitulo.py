@@ -6,8 +6,6 @@ from __future__ import unicode_literals, print_function
 
 
 import difflib
-import gzip
-import io
 import re
 import sys
 from os import path
@@ -20,7 +18,7 @@ import requests
 
 _NETWORK_ENABLED = True
 
-MAIN_URL = 'https://www.tusubtitulo.com/'
+MAIN_URL = 'http://www.tusubtitulo.com/'
 SERIES_INDEX_URL = MAIN_URL + 'series.php'
 SERIES_PAGE_PATTERN = MAIN_URL + 'show/{show}'
 SEASON_PAGE_PATTERN = (MAIN_URL +
@@ -28,13 +26,14 @@ SEASON_PAGE_PATTERN = (MAIN_URL +
 
 
 class API(object):
-    def __init__(self, fetch_func=None):
-        if fetch_func is None:
-            fetch_func = Fetcher().fetch
-        self._fetch_func = fetch_func
+    def __init__(self, fetcher=None):
+        if fetcher is None:
+            fetcher = Fetcher()
+        self._fetcher = fetcher
 
     def fetch(self, url, headers={}):
-        return self._fetch_func(url, headers)
+        # print("===> Fetch {}".format(url))
+        return self._fetcher.fetch(url, headers)
 
     def get_show(self, show):
         def _get_id_from_url(url):
@@ -92,9 +91,9 @@ class API(object):
 
     def get_subtitles(self, show, season, episode=None):
         language_table = {
-            'english': 'en-US',
-            'español (españa)': 'es-ES',
-            'español (latinoamérica)': 'es-LAT'
+            'english': 'en-us',
+            'español (españa)': 'es-es',
+            'español (latinoamérica)': 'es-lat'
         }
 
         showinfo = self.get_show(show)
@@ -104,6 +103,7 @@ class API(object):
         )
         season_data = parse_season_page(buff)
 
+        state = self._fetcher.get_state()
         ret = []
         for (ep, title, version, language, url) in season_data:
             if ep is not None and ep != episode:
@@ -121,7 +121,8 @@ class API(object):
                 version=version,
                 language=language,
                 url=url,
-                title=title))
+                title=title,
+                params=state))
 
         return ret
 
@@ -160,14 +161,27 @@ class ShowInfo(object):
 
 
 class SubtitleInfo(object):
-    def __init__(self, show, season, ep, version, language, url, title=None):
+    def __init__(self, show, season, ep, version, language, url, params={},
+                 title=None):
         self.show = show
         self.season = season
         self.episode = ep
-        self.title = title
+        self._title = title
         self.version = version
         self.language = language
         self.url = url
+        self.params = params
+
+    @property
+    def title(self):
+        if self._title:
+            return self._title
+
+        else:
+            return "{show} - s{season:02d}xe{episode:02d}".format(
+                show=self.show.title,
+                season=self.season,
+                episode=self.episode)
 
     def __repr__(self):
         fmt = (
@@ -206,7 +220,7 @@ def parse_index_page(buff):
     soup = _soupify(buff)
 
     return {
-        x.text: 'https://www.tusubtitulo.com' + x.attrs['href']
+        x.text: 'http://www.tusubtitulo.com' + x.attrs['href']
         for x in soup.select('a')
         if x.attrs.get('href', '').startswith('/show/')
     }
@@ -227,15 +241,14 @@ def parse_season_page(buff):
 
             # Get title
             title = td.text.strip()
-            if ' - ' in title:
-                title = title.split(' - ', 1)[1]
+            # if ' - ' in title:
+            #     title = title.split(' - ', 1)[1]
 
             # Get episode number
             m = re.search(
                 r'/\d+/(\d+)/\d+/',  # season/episode/show_id
-                td.select_one('a').attrs['href'])
+                td.select('a')[0].attrs['href'])
             ep = m.group(1)
-
             curr_ep = ep
             curr_title = title
 
@@ -257,12 +270,10 @@ def parse_season_page(buff):
             if completed is False:
                 continue
 
-            link_node = completed_node.findNextSibling('td').select_one('a')
-            if link_node is None:
-                continue
+            link_node = completed_node.findNextSibling('td').select('a')[0]
 
             try:
-                href = 'https:' + link_node.attrs['href']
+                href = 'http:' + link_node.attrs['href']
             except KeyError:
                 continue
 
@@ -279,6 +290,7 @@ def parse_season_page(buff):
 #
 # Network
 #
+
 
 class Fetcher(object):
     def __init__(self, headers={}):
@@ -298,13 +310,27 @@ class Fetcher(object):
         if not _NETWORK_ENABLED:
             raise RuntimeError('Network not enabled')
 
-        resp = self._session.get(url, headers=headers)
+        resp = self._session.get(url, verify=False, headers=headers)
         if resp.status_code != 200:
             raise Exception('Invalid response')
 
         self._session.headers.update({'Referer': url})
 
         return resp.text
+
+    def get_state(self):
+        return {
+            'headers': dict(self._session.headers),
+            'cookies': self._session.cookies.get_dict()
+        }
+
+    def set_state(self, state):
+        self._session.headers.clear()
+        self._session.headers.update(state.get('headers', {}))
+
+        self._session.cookies.clear()
+        for (k, v) in state.get('cookies', {}).items():
+            self._session.cookies.set(k, v)
 
 
 def main(filename):

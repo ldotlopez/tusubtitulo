@@ -4,8 +4,8 @@ from __future__ import unicode_literals, print_function
 
 
 import unittest
-from os import path
 import re
+from os import path
 
 import tusubtitulo
 tusubtitulo._NETWORK_ENABLED = False
@@ -24,24 +24,42 @@ def read_sample(samplename):
         return fh.read()
 
 
-def mock_fetcher(url, headers={}):
-    url = re.subn(
-        r'[^0-9a-z]',
-        '-',
-        url, flags=re.IGNORECASE)[0]
-    return read_sample(url)
+class MockFetcher(object):
+    state = {
+        'headers': {
+            'foo': 'bar'
+        },
+        'cookies': {
+            'qwerty': '123456'
+        }
+    }
+
+    def fetch(self, url, headers={}):
+        url = re.subn(
+            r'[^0-9a-z]',
+            '-',
+            url, flags=re.IGNORECASE)[0]
+        return read_sample(url)
+
+    def get_state(self):
+        return self.state.copy()
+
+    def set_state(self, state):
+        self.state = state.copy()
 
 
 class API(tusubtitulo.API):
     def __init__(self, *args, **kwargs):
-        super(API, self).__init__(fetch_func=mock_fetcher)
+        super(API, self).__init__(fetcher=MockFetcher())
 
 
 class ParsersTest(unittest.TestCase):
+    fetcher = MockFetcher()
+
     def test_series_index_parser(self):
 
         data = tusubtitulo.parse_index_page(
-            mock_fetcher(tusubtitulo.SERIES_INDEX_URL))
+            self.fetcher.fetch(tusubtitulo.SERIES_INDEX_URL))
 
         self.assertEqual(
             data['Black Mirror'],
@@ -50,7 +68,7 @@ class ParsersTest(unittest.TestCase):
 
     def test_season_page_parser(self):
         url = tusubtitulo.SEASON_PAGE_PATTERN.format(show='1093', season='5')
-        data = tusubtitulo.parse_season_page(mock_fetcher(url))
+        data = tusubtitulo.parse_season_page(self.fetcher.fetch(url))
 
         self.assertTrue((
             '10',
@@ -93,7 +111,7 @@ class APITest(unittest.TestCase):
         info = self.api.get_subtitles('American Horror Story', '5', '3')
         self.assertEqual(len(info), 5)
 
-        es_ES = [x for x in info if x.language == 'es-ES']
+        es_ES = [x for x in info if x.language == 'es-es']
         self.assertEqual(len(es_ES), 3)
 
     def test_from_filename(self):
@@ -101,16 +119,52 @@ class APITest(unittest.TestCase):
             'American Horror Story 5x03 - Mommy.mkv')
         self.assertEqual(len(info), 5)
 
-        es_ES = [x for x in info if x.language == 'es-ES']
+        es_ES = [x for x in info if x.language == 'es-es']
         self.assertEqual(len(es_ES), 3)
 
     def test_house_5_03(self):
         info = self.api.get_subtitles_from_filename('house 5x03.avi')
         self.assertEqual(len(info), 1)
         self.assertEqual(info[0].version, 'HDTV.XviD-LOL')
-        self.assertEqual(info[0].language, 'es-ES')
+        self.assertEqual(info[0].language, 'es-es')
         self.assertEqual(
             info[0].url, 'https://www.tusubtitulo.com/updated/5/40/0')
+
+
+class FetcherTest(unittest.TestCase):
+    def setUp(self):
+        tusubtitulo._NETWORK_ENABLED = True
+
+    def tearDown(self):
+        tusubtitulo._NETWORK_ENABLED = False
+
+    def test_dump(self):
+        fetcher = tusubtitulo.Fetcher()
+        fetcher.fetch('http://httpbin.org/cookies/set?foo=bar')
+
+        state = fetcher.get_state()
+        self.assertEqual(state['cookies']['foo'], 'bar')
+        self.assertEqual(
+            state['headers']['Referer'],
+            'http://httpbin.org/cookies/set?foo=bar')
+
+    def test_load(self):
+        state = {
+            'headers': {
+                'Referer': 'http://localhost/',
+                'X-Foo': 'foo'
+                # No user-agent here!
+            },
+            'cookies': {
+                'salchi': 'papa'
+            }
+        }
+        fetcher = tusubtitulo.Fetcher()
+        fetcher.set_state(state)
+
+        self.assertFalse('User-Agent' in fetcher._session.headers)
+        self.assertEqual(fetcher._session.headers['X-Foo'], 'foo')
+
 
 if __name__ == '__main__':
     unittest.main()
