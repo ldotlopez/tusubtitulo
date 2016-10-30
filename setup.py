@@ -1,6 +1,9 @@
+#!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 
 from distutils.core import setup
+
+requirements = [x.strip() for x in open('requirements.txt').readlines()]
 
 setup(
     name='tusubtitulo',
@@ -13,4 +16,5 @@ setup(
     license='LICENSE.txt',
     description='API and command line downloader for tusubtitulo.com',
     long_description=open('README.md').read(),
+    install_requires=requirements
 )
