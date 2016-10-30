@@ -13,9 +13,4 @@ setup(
     license='LICENSE.txt',
     description='API and command line downloader for tusubtitulo.com',
     long_description=open('README.md').read(),
-    install_requires=[
-        'beautifulsoup4'
-        'guessit'
-        'requests'
-    ],
 )
