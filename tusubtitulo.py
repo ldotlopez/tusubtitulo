@@ -330,14 +330,53 @@ class Fetcher(object):
 
 
 def main(filename):
-    api = API()
-    subs = api.get_subtitles_from_filename(path.basename(filename))
-    print(api.fetch_subtitle(subs[0]))
+    extension_table = {
+        'en-us': 'en',
+        'es-es': 'es',
+        'es-lat': 'lat'
+    }
 
+    api = API()
+
+    subs = {}
+    for sub in api.get_subtitles_from_filename(path.basename(filename)):
+        if sub.language not in subs:
+            subs[sub.language] = []
+        subs[sub.language].append(sub)
+
+    for (language, subs) in subs.items():
+        # Try to download proper version
+        versions = [sub.version.lower() for sub in subs]
+        propers = ['proper' in ver or 'repack' in ver for ver in versions]
+        try:
+            match = subs[propers.index(True)]
+        except ValueError:
+            match = sorted(subs, key=lambda x: x.url)[-1]
+
+        name, ext = path.splitext(filename)
+        subname = '%(name)s.%(language)s.srt' % dict(
+            name=name, language=extension_table[match.language]
+        )
+
+        if not path.exists(subname):
+            with open(subname, 'wb+') as fh:
+                buff = api.fetch_subtitle(match)
+                fh.write(buff.encode('utf-8'))
+            print("Saved %(language)s subtitle to %(subtitle_name)s" % dict(
+                language=match.language,
+                subtitle_name=subname
+            ))
+
+        else:
+            print("Skipping %(language)s, filename %(subtitle_name)s already exists" % dict(
+                language=match.language,
+                subtitle_name=subname
+            ))
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print("Usage: {} filename".format(sys.argv[0]))
         sys.exit(1)
 
-    main(sys.argv[1])
+    name = ' '.join(sys.argv[1:])
+    main(name)
