@@ -229,39 +229,35 @@ def parse_index_page(buff):
 def parse_season_page(buff):
     ret = []
 
-    curr_title = None
-    curr_ep = None
-    curr_version = None
+    curr_episode_title = None
+    curr_episode_number = None
+    curr_episode_version = None
 
     soup = _soupify(buff)
     for td in soup.select('td'):
 
         # Episode title header
         if td.attrs.get('colspan', '') == '5':
-
             # Get title
             title = td.text.strip()
-            # if ' - ' in title:
-            #     title = title.split(' - ', 1)[1]
 
             # Get episode number
-            m = re.search(
-                r'/\d+/(\d+)/\d+/',  # season/episode/show_id
-                td.select('a')[0].attrs['href'])
-            ep = m.group(1)
-            curr_ep = ep
-            curr_title = title
+            # Current site version doesn't have a parseable episode number so
+            # we extract it from title
+            m = re.search(r'.*\d+x(0+)?(\d+) - .*?', title)
+            episode_number = m.group(2)
 
-            # print("Got episode {} header: {}".format(ep, title))
+            curr_episode_number = episode_number
+            curr_episode_title = title
+
 
         # Version header
         elif td.attrs.get('colspan', '') == '3':
-            curr_version = td.text.strip()
-            if ' ' in curr_version:
-                curr_version = curr_version.split(' ', 1)[1]
+            curr_episode_version = td.text.strip()
+            if ' ' in curr_episode_version:
+                curr_episode_version = curr_episode_version.split(' ', 1)[1]
 
-            # print("  Version:", curr_version)
-
+        # Language
         elif 'language' in td.attrs.get('class', []):
             language = td.text.strip()
 
@@ -278,9 +274,9 @@ def parse_season_page(buff):
                 continue
 
             ret.append((
-                curr_ep,
-                curr_title,
-                curr_version,
+                curr_episode_number,
+                curr_episode_title,
+                curr_episode_version,
                 language,
                 href
             ))
