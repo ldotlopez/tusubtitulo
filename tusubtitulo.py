@@ -136,8 +136,16 @@ class API(object):
             if f not in info or info[f] in (None, ''):
                 raise ValueError('Invalid episode filename:' + filename)
 
+        if 'year' in info:
+            series = '%(series)s (%(year)s)' % dict(
+                series=info['title'],
+                year=info['year']
+            )
+        else:
+            series = info['title']
+
         return self.get_subtitles(
-            info['title'], str(info['season']), str(info['episode']))
+            series, str(info['season']), str(info['episode']))
 
     def fetch_subtitle(self, subtitle_info):
         headers = {
@@ -250,7 +258,6 @@ def parse_season_page(buff):
             curr_episode_number = episode_number
             curr_episode_title = title
 
-
         # Version header
         elif td.attrs.get('colspan', '') == '3':
             curr_episode_version = td.text.strip()
@@ -329,7 +336,7 @@ class Fetcher(object):
             self._session.cookies.set(k, v)
 
 
-def main(filename):
+def download_for(filename):
     extension_table = {
         'en-us': 'en',
         'es-es': 'es',
@@ -368,15 +375,18 @@ def main(filename):
             ))
 
         else:
-            print("Skipping %(language)s, filename %(subtitle_name)s already exists" % dict(
+            msg = ("Skipping %(language)s, filename %(subtitle_name)s already "
+                   "exists")
+            print(msg % dict(
                 language=match.language,
                 subtitle_name=subname
             ))
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("Usage: {} filename".format(sys.argv[0]))
         sys.exit(1)
 
-    name = ' '.join(sys.argv[1:])
-    main(name)
+    for x in sys.argv[1:]:
+        download_for(x)
