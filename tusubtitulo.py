@@ -32,7 +32,6 @@ class API(object):
         self._fetcher = fetcher
 
     def fetch(self, url, headers={}):
-        # print("===> Fetch {}".format(url))
         return self._fetcher.fetch(url, headers)
 
     def get_show(self, show):
@@ -153,7 +152,7 @@ class API(object):
                 show=subtitle_info.show.id,
                 season=subtitle_info.season)
         }
-        return self.fetch(subtitle_info.url, headers).text
+        return self.fetch(subtitle_info.url, headers).content
 
 
 class ShowInfo(object):
@@ -220,7 +219,6 @@ class ShowNotFoundError(Exception):
 #
 
 def _soupify(buff, encoding='utf-8', parser="html.parser"):
-    # return bs4.BeautifulSoup(buff.decode(encoding), parser)
     return bs4.BeautifulSoup(buff, parser)
 
 
@@ -302,34 +300,38 @@ class Fetcher(object):
                            'AppleWebKit/537.36 (KHTML, like Gecko) '
                            'Chrome/50.0.2661.102 Safari/537.36'),
             'Accept-Language': 'en, en-gb;q=0.9, en-us;q=0.9',
+            'Accept-Charset': 'utf-8, iso-8859-1;q=0.5',
             'Referer': ''
         }
 
+        self._headers = {}
+        self._headers.update(default_headers)
+        self._headers.update(headers)
         self._session = requests.Session()
-        self._session.headers.update(default_headers)
-        self._session.headers.update(headers)
 
     def fetch(self, url, headers={}):
         if not _NETWORK_ENABLED:
             raise RuntimeError('Network not enabled')
 
-        resp = self._session.get(url, verify=False, headers=headers)
+        headers_ = self._headers.copy()
+        headers_.update(headers)
+        resp = self._session.get(url, verify=False, headers=headers_)
         if resp.status_code != 200:
             raise Exception('Invalid response')
 
-        self._session.headers.update({'Referer': url})
+        self._headers.update({'Referer': url})
 
         return resp
 
     def get_state(self):
         return {
-            'headers': dict(self._session.headers),
+            'headers': dict(self._headers),
             'cookies': self._session.cookies.get_dict()
         }
 
     def set_state(self, state):
-        self._session.headers.clear()
-        self._session.headers.update(state.get('headers', {}))
+        self._headers.clear()
+        self._headers.update(state.get('headers', {}))
 
         self._session.cookies.clear()
         for (k, v) in state.get('cookies', {}).items():
@@ -368,7 +370,8 @@ def download_for(filename):
         if not path.exists(subname):
             with open(subname, 'wb+') as fh:
                 buff = api.fetch_subtitle(match)
-                fh.write(buff.encode('utf-8'))
+                fh.write(buff)
+
             print("Saved %(language)s subtitle to %(subtitle_name)s" % dict(
                 language=match.language,
                 subtitle_name=subname
