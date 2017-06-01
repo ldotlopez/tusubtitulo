@@ -389,4 +389,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     for x in sys.argv[1:]:
-        download_for(x)
+        try:
+            download_for(x)
+        except ShowNotFoundError as e:
+            print("Show not found: {show}".format(show=e.show), file=sys.stderr)
