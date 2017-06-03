@@ -2,10 +2,13 @@
 
 
 # Compatibity stuff
-from __future__ import unicode_literals, print_function
+from __future__ import print_function
 
 
+import argparse
 import difflib
+import hashlib
+import logging
 import re
 import sys
 from os import path
@@ -14,6 +17,10 @@ from os import path
 import bs4
 import guessit
 import requests
+
+
+logging.captureWarnings(True)
+# logger = logging.getLogger()
 
 
 _NETWORK_ENABLED = True
@@ -89,18 +96,19 @@ class API(object):
         raise ShowNotFoundError(show)
 
     def get_subtitles(self, show, season, episode=None):
+        # Incoming data is unicode, but language codes are simple strings
         language_table = {
-            'english': 'en-us',
-            'español (españa)': 'es-es',
-            'español (latinoamérica)': 'es-lat'
+            u'english': 'en-us',
+            u'español (españa)': 'es-es',
+            u'español (latinoamérica)': 'es-lat'
         }
 
         showinfo = self.get_show(show)
-        buff = self.fetch(
+        resp = self.fetch(
             SEASON_PAGE_PATTERN.format(show=showinfo.id, season=season),
             {'Referer': showinfo.url}
-        ).text
-        season_data = parse_season_page(buff)
+        )
+        season_data = parse_season_page(resp.text)
 
         state = self._fetcher.get_state()
         ret = []
@@ -152,7 +160,14 @@ class API(object):
                 show=subtitle_info.show.id,
                 season=subtitle_info.season)
         }
-        return self.fetch(subtitle_info.url, headers).content
+        resp = self.fetch(subtitle_info.url, headers)
+        # msg = "Got {len} bytes with encoding {encoding}, hash: {hash}"
+        # msg = msg.format(len=len(res.content),
+        #                  encoding=resp.encoding,
+        #                  hash=compute_hash(resp.content))
+        # logger.debug(msg)
+        return resp.content
+
 
 
 class ShowInfo(object):
@@ -220,6 +235,12 @@ class ShowNotFoundError(Exception):
 
 def _soupify(buff, encoding='utf-8', parser="html.parser"):
     return bs4.BeautifulSoup(buff, parser)
+
+
+def compute_hash(x):
+    f = hashlib.md5()
+    f.update(x)
+    return f.hexdigest()
 
 
 def parse_index_page(buff):
@@ -315,6 +336,13 @@ class Fetcher(object):
 
         headers_ = self._headers.copy()
         headers_.update(headers)
+
+        # curl_cmd = 'curl -Lv '
+        # for (k, v) in headers_.items():
+        #     curl_cmd += "-H '{}: {}' ".format(k, v)
+        # curl_cmd += ' ' + url
+        # logger.debug(curl_cmd)
+
         resp = self._session.get(url, verify=False, headers=headers_)
         if resp.status_code != 200:
             raise Exception('Invalid response')
