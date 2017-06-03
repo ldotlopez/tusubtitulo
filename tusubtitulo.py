@@ -366,7 +366,7 @@ class Fetcher(object):
             self._session.cookies.set(k, v)
 
 
-def download_for(filename):
+def download_for(filename, languages=None):
     extension_table = {
         'en-us': 'en',
         'es-es': 'es',
@@ -376,12 +376,16 @@ def download_for(filename):
     api = API()
 
     subs = {}
+
     for sub in api.get_subtitles_from_filename(path.basename(filename)):
         if sub.language not in subs:
             subs[sub.language] = []
         subs[sub.language].append(sub)
 
     for (language, subs) in subs.items():
+        if languages and language not in languages:
+            continue
+
         # Try to download proper version
         versions = [sub.version.lower() for sub in subs]
         propers = ['proper' in ver or 'repack' in ver for ver in versions]
@@ -415,12 +419,17 @@ def download_for(filename):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print("Usage: {} filename".format(sys.argv[0]))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-l', '--language', dest='languages', action='append', default=[], type=str)
+    parser.add_argument(dest='filenames', nargs='+')
+    args = parser.parse_args(sys.argv[1:])
+
+    if not args.filenames:
+        args.print_help()
         sys.exit(1)
 
-    for x in sys.argv[1:]:
+    for x in args.filenames:
         try:
-            download_for(x)
+            download_for(x, languages=[x.lower() for x in args.languages])
         except ShowNotFoundError as e:
             print("Show not found: {show}".format(show=e.show), file=sys.stderr)
