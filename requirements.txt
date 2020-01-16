@@ -1,3 +1,12 @@
-beautifulsoup4==4.5.1
-guessit==2.1.0
-requests==2.11.1
+babelfish==0.5.5
+beautifulsoup4==4.8.2
+certifi==2019.11.28
+chardet==3.0.4
+guessit==3.1.0
+idna==2.8
+python-dateutil==2.8.1
+rebulk==2.0.0
+requests==2.22.0
+six==1.14.0
+soupsieve==1.9.5
+urllib3==1.25.7
