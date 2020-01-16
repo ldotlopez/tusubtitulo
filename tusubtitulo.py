@@ -1,8 +1,21 @@
 # -*- encoding: utf-8 -*-
 
-
-# Compatibity stuff
-from __future__ import print_function
+# Copyright (C) 2019 Luis López <luis@cuarentaydos.com>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
+# USA.
 
 
 import argparse
@@ -35,7 +48,7 @@ SEASON_PAGE_PATTERN = (
 )
 
 
-class API(object):
+class API:
     def __init__(self, fetcher=None):
         if fetcher is None:
             fetcher = Fetcher()
@@ -88,9 +101,9 @@ class API(object):
     def get_subtitles(self, show, season, episode=None):
         # Incoming data is unicode, but language codes are simple strings
         language_table = {
-            u"english": "en-us",
-            u"español (españa)": "es-es",
-            u"español (latinoamérica)": "es-lat",
+            "english": "en-us",
+            "español (españa)": "es-es",
+            "español (latinoamérica)": "es-lat",
         }
 
         showinfo = self.get_show(show)
@@ -165,7 +178,7 @@ class API(object):
         return resp.content
 
 
-class ShowInfo(object):
+class ShowInfo:
     def __init__(self, title, id, url):
         self.title = title
         self.id = id
@@ -177,7 +190,7 @@ class ShowInfo(object):
         return SERIES_PAGE_PATTERN.format(show=self.id)
 
 
-class SubtitleInfo(object):
+class SubtitleInfo:
     def __init__(
         self, show, season, ep, version, language, url, params={}, title=None
     ):
