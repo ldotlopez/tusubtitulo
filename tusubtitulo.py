@@ -137,11 +137,11 @@ class API(object):
         info = guessit.guessit(filename)
 
         if info['type'] != 'episode':
-            raise ValueError('Invalid episode filename:' + filename)
+            raise ParseError('Invalid episode filename')
 
         for f in 'title season episode'.split(' '):
             if f not in info or info[f] in (None, ''):
-                raise ValueError('Invalid episode filename:' + filename)
+                raise ParseError('Invalid episode filename')
 
         if 'year' in info:
             series = '%(series)s (%(year)s)' % dict(
@@ -227,6 +227,10 @@ class ShowNotFoundError(Exception):
     def __init__(self, series, *args, **kwargs):
         self.show = series
         super(ShowNotFoundError, self).__init__(*args, **kwargs)
+
+
+class ParseError(Exception):
+    pass
 
 
 #
@@ -431,5 +435,7 @@ if __name__ == '__main__':
     for x in args.filenames:
         try:
             download_for(x, languages=[x.lower() for x in args.languages])
+        except ParseError as e:
+            print("Unable to parse '%s': %s" % (x, e))
         except ShowNotFoundError as e:
             print("Show not found: {show}".format(show=e.show), file=sys.stderr)
