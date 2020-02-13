@@ -18,24 +18,14 @@
 # USA.
 
 
-import argparse
 import difflib
 import hashlib
-import logging
 import re
-import sys
-from os import path
 
 
 import bs4
 import guessit
 import requests
-
-
-logging.captureWarnings(True)
-logging.basicConfig()
-
-logger = logging.getLogger("tusubtitulo")
 
 
 _NETWORK_ENABLED = True
@@ -384,82 +374,3 @@ class Fetcher(object):
         self._session.cookies.clear()
         for (k, v) in state.get("cookies", {}).items():
             self._session.cookies.set(k, v)
-
-
-def download_for(filename, languages=None):
-    extension_table = {"en-us": "en", "es-es": "es", "es-lat": "lat"}
-
-    api = API()
-
-    subs = {}
-
-    for sub in api.get_subtitles_from_filename(path.basename(filename)):
-        if sub.language not in subs:
-            subs[sub.language] = []
-        subs[sub.language].append(sub)
-
-    for (language, subs) in subs.items():
-        if languages and language not in languages:
-            continue
-
-        # Try to download proper version
-        versions = [sub.version.lower() for sub in subs]
-        propers = ["proper" in ver or "repack" in ver for ver in versions]
-        try:
-            match = subs[propers.index(True)]
-        except ValueError:
-            match = sorted(subs, key=lambda x: x.url)[-1]
-
-        name, ext = path.splitext(filename)
-        subname = "%(name)s.%(language)s.srt" % dict(
-            name=name, language=extension_table[match.language]
-        )
-
-        if not path.exists(subname):
-            with open(subname, "wb+") as fh:
-                buff = api.fetch_subtitle(match)
-                fh.write(buff)
-
-            msg = "Saved %(language)s subtitle to %(subtitle_name)s"
-            msg = msg % dict(language=match.language, subtitle_name=subname)
-            print(msg)
-
-        else:
-            msg = (
-                "Skipping %(language)s ,"
-                "filename %(subtitle_name)s already exists"
-            )
-            msg = msg % dict(language=match.language, subtitle_name=subname)
-            print(msg)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-l",
-        "--language",
-        dest="languages",
-        action="append",
-        default=[],
-        type=str,
-    )
-    parser.add_argument(dest="filenames", nargs="+")
-    args = parser.parse_args(sys.argv[1:])
-
-    if not args.filenames:
-        args.print_help()
-        sys.exit(1)
-
-    for x in args.filenames:
-        try:
-            download_for(x, languages=[x.lower() for x in args.languages])
-
-        except ParseError as e:
-            msg = "Unable to parse '%(filename)s': %(error)s"
-            msg = msg % dict(filename=x, error=str(e))
-            print(msg, file=sys.stderr)
-
-        except ShowNotFoundError as e:
-            msg = "Show not found: %(show)s"
-            msg = msg % dict(show=e.show)
-            print(msg, file=sys.stderr)
