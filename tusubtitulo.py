@@ -363,7 +363,7 @@ class Fetcher(object):
         # curl_cmd += ' ' + url
         # logger.debug(curl_cmd)
 
-        resp = self._session.get(url, verify=False, headers=headers_)
+        resp = self._session.get(url, headers=headers_)
         if resp.status_code != 200:
             raise Exception("Invalid response")
 
@@ -420,17 +420,17 @@ def download_for(filename, languages=None):
                 buff = api.fetch_subtitle(match)
                 fh.write(buff)
 
-            print(
-                "Saved %(language)s subtitle to %(subtitle_name)s"
-                % dict(language=match.language, subtitle_name=subname)
-            )
+            msg = "Saved %(language)s subtitle to %(subtitle_name)s"
+            msg = msg % dict(language=match.language, subtitle_name=subname)
+            print(msg)
 
         else:
             msg = (
-                "Skipping %(language)s, filename %(subtitle_name)s already "
-                "exists"
+                "Skipping %(language)s ,"
+                "filename %(subtitle_name)s already exists"
             )
-            print(msg % dict(language=match.language, subtitle_name=subname))
+            msg = msg % dict(language=match.language, subtitle_name=subname)
+            print(msg)
 
 
 if __name__ == "__main__":
@@ -453,9 +453,13 @@ if __name__ == "__main__":
     for x in args.filenames:
         try:
             download_for(x, languages=[x.lower() for x in args.languages])
+
         except ParseError as e:
-            print("Unable to parse '%s': %s" % (x, e))
+            msg = "Unable to parse '%(filename)s': %(error)s"
+            msg = msg % dict(filename=x, error=str(e))
+            print(msg, file=sys.stderr)
+
         except ShowNotFoundError as e:
-            print(
-                "Show not found: {show}".format(show=e.show), file=sys.stderr
-            )
+            msg = "Show not found: %(show)s"
+            msg = msg % dict(show=e.show)
+            print(msg, file=sys.stderr)
