@@ -18,313 +18,29 @@
 # USA.
 
 
+import dataclasses
 import difflib
-import hashlib
+import logging
+import os.path
 import re
+import sys
+import urllib
 
 
 import bs4
 import guessit
-import requests
 
-
-_NETWORK_ENABLED = True
-
-MAIN_URL = "http://www.tusubtitulo.com/"
-SERIES_INDEX_URL = MAIN_URL + "series.php"
-SERIES_PAGE_PATTERN = MAIN_URL + "show/{show}"
-SEASON_PAGE_PATTERN = (
-    MAIN_URL + "ajax_loadShow.php?show={show}&season={season}"
-)
+def distance(a, b):
+    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
 class API:
-    def __init__(self, fetcher=None):
-        if fetcher is None:
-            fetcher = Fetcher()
-        self._fetcher = fetcher
-
-    def fetch(self, url, headers={}):
-        return self._fetcher.fetch(url, headers)
-
-    def get_show(self, show):
-        def _get_id_from_url(url):
-            m = re.match(MAIN_URL + r"show/(\d+)", url, flags=re.IGNORECASE)
-
-            if not m:
-                raise ValueError(url)
-
-            return m.group(1)
-
-        buff = self.fetch(SERIES_INDEX_URL, {"Referer": MAIN_URL}).text
-
-        # Search exact match
-        table = parse_index_page(buff)
-        rev = {v: k for (k, v) in table.items()}
-
-        if show in table:
-            return ShowInfo(
-                title=show, id=_get_id_from_url(table[show]), url=table[show]
-            )
-
-        # Search by lowercase
-        lc_table = {show.lower(): link for (show, link) in table.items()}
-        lc_show = show.lower()
-        if lc_show in lc_table:
-            url = lc_table[lc_show]
-            return ShowInfo(title=rev[url], id=_get_id_from_url(url), url=url)
-
-        # Aproximate search
-        ratios = [
-            (key, difflib.SequenceMatcher(None, lc_show, key).ratio())
-            for key in lc_table
-        ]
-
-        ratios = reversed(sorted(ratios, key=lambda x: x[1]))
-        first = next(ratios)
-        if first[1] >= 0.75:
-            url = lc_table[first[0]]
-            return ShowInfo(title=rev[url], id=_get_id_from_url(url), url=url)
-
-        raise ShowNotFoundError(show)
-
-    def get_subtitles(self, show, season, episode=None):
-        # Incoming data is unicode, but language codes are simple strings
-        language_table = {
-            "english": "en-us",
-            "español (españa)": "es-es",
-            "español (latinoamérica)": "es-lat",
-        }
-
-        showinfo = self.get_show(show)
-        resp = self.fetch(
-            SEASON_PAGE_PATTERN.format(show=showinfo.id, season=season),
-            {"Referer": showinfo.url},
-        )
-        season_data = parse_season_page(resp.text)
-
-        state = self._fetcher.get_state()
-        ret = []
-        for (ep, title, version, language, url) in season_data:
-            if ep is not None and ep != episode:
-                continue
-
-            try:
-                language = language_table[language.lower()]
-            except KeyError:
-                continue
-
-            ret.append(
-                SubtitleInfo(
-                    show=showinfo,
-                    season=season,
-                    ep=ep,
-                    version=version,
-                    language=language,
-                    url=url,
-                    title=title,
-                    params=state,
-                )
-            )
-
-        return ret
-
-    def get_subtitles_from_filename(self, filename):
-        try:
-            info = guessit.guessit(filename)
-        except guessit.api.GuessitException as e:
-            raise ParseError("Guessit error: %s" % e)
-
-        if info["type"] != "episode":
-            raise ParseError("Invalid episode filename")
-
-        for f in "title season episode".split(" "):
-            if f not in info or info[f] in (None, ""):
-                raise ParseError("Invalid episode filename")
-
-        if "year" in info:
-            series = "%(series)s (%(year)s)" % dict(
-                series=info["title"], year=info["year"]
-            )
-        else:
-            series = info["title"]
-
-        return self.get_subtitles(
-            series, str(info["season"]), str(info["episode"])
-        )
-
-    def fetch_subtitle(self, subtitle_info):
-        headers = {
-            "Referer": SEASON_PAGE_PATTERN.format(
-                show=subtitle_info.show.id, season=subtitle_info.season
-            )
-        }
-        resp = self.fetch(subtitle_info.url, headers)
-        # msg = "Got {len} bytes with encoding {encoding}, hash: {hash}"
-        # msg = msg.format(len=len(res.content),
-        #                  encoding=resp.encoding,
-        #                  hash=compute_hash(resp.content))
-        # logger.debug(msg)
-        return resp.content
-
-
-class ShowInfo:
-    def __init__(self, title, id, url):
-        self.title = title
-        self.id = id
-
-        assert self.url == url
-
-    @property
-    def url(self):
-        return SERIES_PAGE_PATTERN.format(show=self.id)
-
-
-class SubtitleInfo:
-    def __init__(
-        self, show, season, ep, version, language, url, params={}, title=None
-    ):
-        self.show = show
-        self.season = season
-        self.episode = ep
-        self._title = title
-        self.version = version
-        self.language = language
-        self.url = url
-        self.params = params
-
-    @property
-    def title(self):
-        if self._title:
-            return self._title
-
-        else:
-            return "{show} - s{season:02d}xe{episode:02d}".format(
-                show=self.show.title, season=self.season, episode=self.episode
-            )
-
-    def __repr__(self):
-        fmt = (
-            "<"
-            "{mod}.{cls} "
-            "{show} s:{season} e:{episode} ({language}/{version}) "
-            "{url}>"
-        )
-
-        return fmt.format(
-            mod=__name__,
-            cls=self.__class__.__name__,
-            show=self.show.title,
-            language=self.language,
-            season=self.season,
-            episode=self.episode,
-            version=self.version,
-            url=self.url,
-        )
-
-
-class ShowNotFoundError(Exception):
-    def __init__(self, series, *args, **kwargs):
-        self.show = series
-        super(ShowNotFoundError, self).__init__(*args, **kwargs)
-
-
-class ParseError(Exception):
-    pass
-
-
-#
-# Parsers
-#
-
-
-def _soupify(buff, encoding="utf-8", parser="html.parser"):
-    return bs4.BeautifulSoup(buff, parser)
-
-
-def compute_hash(x):
-    f = hashlib.md5()
-    f.update(x)
-    return f.hexdigest()
-
-
-def parse_index_page(buff):
-    soup = _soupify(buff)
-
-    return {
-        x.text: "http://www.tusubtitulo.com" + x.attrs["href"]
-        for x in soup.select("a")
-        if x.attrs.get("href", "").startswith("/show/")
-    }
-
-
-def parse_season_page(buff):
-    ret = []
-
-    curr_episode_title = None
-    curr_episode_number = None
-    curr_episode_version = None
-
-    soup = _soupify(buff)
-    for td in soup.select("td"):
-
-        # Episode title header
-        if td.attrs.get("colspan", "") == "5":
-            # Get title
-            title = td.text.strip()
-
-            # Get episode number
-            # Current site version doesn't have a parseable episode number so
-            # we extract it from title
-            m = re.search(r".*\d+x(0+)?(\d+) - .*?", title)
-            episode_number = m.group(2)
-
-            curr_episode_number = episode_number
-            curr_episode_title = title
-
-        # Version header
-        elif td.attrs.get("colspan", "") == "3":
-            curr_episode_version = td.text.strip()
-            if " " in curr_episode_version:
-                curr_episode_version = curr_episode_version.split(" ", 1)[1]
-
-        # Language
-        elif "language" in td.attrs.get("class", []):
-            language = td.text.strip()
-
-            completed_node = td.findNextSibling("td")
-            completed = completed_node.text.strip().lower() == "completado"
-            if completed is False:
-                continue
-
-            link_node = completed_node.findNextSibling("td").select("a")[0]
-
-            try:
-                href = "http:" + link_node.attrs["href"]
-            except KeyError:
-                continue
-
-            ret.append(
-                (
-                    curr_episode_number,
-                    curr_episode_title,
-                    curr_episode_version,
-                    language,
-                    href,
-                )
-            )
-
-    return ret
-
-
-#
-# Network
-#
-
-
-class Fetcher(object):
-    def __init__(self, headers={}):
-        default_headers = {
+    SHOW_INDEX = "https://www.tusubtitulo.com/series.php"
+    SEASON_INFO = "https://www.tusubtitulo.com/ajax_loadShow.php?show=%(series_id)s&season=%(season)s"
+
+    def __init__(self, logger=None):
+        self.logger = logger or logging.getLogger('tusubtitulo')
+        self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; WOW64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -335,42 +51,188 @@ class Fetcher(object):
             "Referer": "",
         }
 
-        self._headers = {}
-        self._headers.update(default_headers)
-        self._headers.update(headers)
-        self._session = requests.Session()
+    def search(self, filepath, language):
+        info = guessit.guessit(filepath)
 
-    def fetch(self, url, headers={}):
-        if not _NETWORK_ENABLED:
-            raise RuntimeError("Network not enabled")
+        if info.get("type") != "episode":
+            excmsg = "Detected file type is: %(type)s, expected 'episode'"
+            excmsg = excmsg % dict(type=info.get("type", "unknow"))
+            raise InvalidFile(excmsg)
 
-        headers_ = self._headers.copy()
-        headers_.update(headers)
+        for req in ["title", "season", "episode"]:
+            if not info.get(req, ""):
+                excmsg = "Missing required info for '%(field)'"
+                excmsg = excmsg % dict(field=req)
+                raise InvalidFile(excmsg)
 
-        # curl_cmd = 'curl -Lv '
-        # for (k, v) in headers_.items():
-        #     curl_cmd += "-H '{}: {}' ".format(k, v)
-        # curl_cmd += ' ' + url
-        # logger.debug(curl_cmd)
+        subtitles = self.get_subtitles_info(info["title"], info["season"], info["episode"])
+        subtitles = [x for x in subtitles if x.language == language]
+        subtitles = list(reversed(sorted(subtitles, key=lambda x: distance(x.version, filepath))))
 
-        resp = self._session.get(url, headers=headers_)
-        if resp.status_code != 200:
-            raise Exception("Invalid response")
+        return subtitles[0]
 
-        self._headers.update({"Referer": url})
+    def get_subtitles_info(self, series: str, season: int, number: int = None):
+        series_id = self.get_series_id(series)
+        subtitles = [
+            Subtitle(
+                series=series,
+                series_id=series_id,
+                season=season,
+                number=x[0],
+                version=x[1],
+                language=x[2],
+                url=x[3],
+            )
+            for x in self.get_season_info(series_id, season)
+        ]
+        if number:
+            subtitles = [x for x in subtitles if x.number == number]
 
-        return resp
+        return subtitles
 
-    def get_state(self):
+    def get_series_id(self, show: str):
+        buff = self.request(self.SHOW_INDEX)
+        data = self.parse_series_index(buff)
+
+        # Return exact match
+        try:
+            return data[show]
+        except KeyError:
+            pass
+
+        # Return lowercase match
+        try:
+            return {k.lower(): v for (k, v) in data.items()}[show.lower()]
+        except KeyError:
+            pass
+
+        # Return by string-distance
+        ratios = [
+            (
+                key,
+                distance(show.lower(), key.lower())
+            )
+            for key in data
+        ]
+        ratios = list(reversed(sorted(ratios, key=lambda x: x[1])))
+
+        if ratios[0][1] > 0.8:
+            return data[ratios[0][0]]
+
+        raise SeriesNotFoundError()
+
+    def get_season_info(self, series_id, season):
+        url = self.SEASON_INFO % dict(
+            series_id=str(series_id), season=str(season)
+        )
+        buff = self.request(url)
+        return self.parse_season_info(buff)
+
+    def parse_series_index(self, buff):
+        soup = self._soupify(buff)
         return {
-            "headers": dict(self._headers),
-            "cookies": self._session.cookies.get_dict(),
+            x.text: x.attrs["href"].split("/")[-1]
+            for x in soup.select("a")
+            if x.attrs.get("href", "").startswith("/show/")
         }
 
-    def set_state(self, state):
-        self._headers.clear()
-        self._headers.update(state.get("headers", {}))
+    def parse_season_info(self, buff):
+        lang_codes = {
+            "english": "en-us",
+            "english (us)": "en-us",
+            "español": "es-es",
+            "español (españa)": "es-es",
+            "español (latinoamérica)": "es-lat",
+            "català": "es-ca",
+            "galego": "es-gl",
+            "brazilian": "pt-br",
+        }
 
-        self._session.cookies.clear()
-        for (k, v) in state.get("cookies", {}).items():
-            self._session.cookies.set(k, v)
+        def _find_episode_block(x):
+            while True:
+                if x.parent is None:
+                    raise ValueError()
+
+                if x.name == "table":
+                    return x
+
+                x = x.parent
+
+        def _get_episode_number(x):
+            m = re.search(
+                r"/episodes/\d+/.+?-\d+x(\d+)", x.attrs.get("href", "")
+            )
+            if not m:
+                raise ValueError()
+
+            return int(m.group(1))
+
+        soup = self._soupify(buff)
+        blocks = [
+            (_get_episode_number(x), _find_episode_block(x))
+            for x in soup.select('a[href*="/episodes/"]')
+        ]
+
+        ret = []
+        for (ep_number, el) in blocks:
+            version_g = (x for x in range(sys.maxsize))
+            cur_version = None
+            cur_lang = None
+            cur_link = None
+
+            for line in el.select("tr"):
+                # Get version
+                m = re.search(r"Versi.+?n(.+)?", line.text, re.IGNORECASE)
+                if m:
+                    cur_version = m.group(1).strip() or (
+                        "ver-%s" % next(version_g)
+                    )
+
+                # Match language
+                language = line.select_one("td.language")
+                if language:
+                    try:
+                        cur_lang = lang_codes[language.text.strip().lower()]
+                    except KeyError:
+                        continue  # Log
+
+                # Match download link
+                link = line.select_one("a")
+                if language and link:
+                    cur_link = link.attrs["href"]
+                    ret.append(
+                        (ep_number, cur_version, cur_lang, "http:" + cur_link)
+                    )
+
+        return ret
+
+    def request(self, url):
+        ret = self._request(url)
+        self.headers["Referer"] = url
+        return ret
+
+    def _request(self, url):
+        req = urllib.request.Request(url, headers=self.headers)
+        with urllib.request.urlopen(req) as fh:
+            return fh.read()
+
+    def _soupify(self, buff):
+        return bs4.BeautifulSoup(buff, features="html.parser")
+
+
+@dataclasses.dataclass
+class Subtitle:
+    series: str
+    series_id: str
+    season: int
+    number: int
+    version: str
+    language: str
+    url: str
+
+
+class SeriesNotFoundError(Exception):
+    pass
+
+class ParseError(Exception):
+    pass

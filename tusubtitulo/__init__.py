@@ -18,6 +18,6 @@
 # USA.
 
 
-from .api import API, ShowNotFoundError, ParseError
+from .api import API, Subtitle, SeriesNotFoundError, ParseError
 
-__all__ = ["API", "ShowNotFoundError", "ParseError"]
+__all__ = ["API", "Subtitle", "SeriesNotFoundError", "ParseError"]

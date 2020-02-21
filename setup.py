@@ -12,7 +12,7 @@ with open(path.dirname(path.realpath(__file__)) + "/requirements.txt") as fh:
 pkgs = [x.strip() for x in pkgs]
 pkgs = [x for x in pkgs if x and x[0] != "#"]
 
-version = "0.0." + datetime.now().strftime("%Y%m%d%H%M%S")
+version = "1.90." + datetime.now().strftime("%Y%m%d%H%M%S")
 
 setup(
     name="tusubtitulo",
