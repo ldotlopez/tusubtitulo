@@ -138,7 +138,7 @@ def main(argv=None):
     parser.add_argument("files", nargs="+")
     args = parser.parse_args(argv)
 
-    loglevel = max(min(0, 2 + args.verbose - args.quiet), len(LOG_LEVELS) - 1)
+    loglevel = min(max(0, 2 + args.verbose - args.quiet), len(LOG_LEVELS) - 1)
     logging.basicConfig()
     logger = logging.getLogger("tusubtitulo")
     logger.setLevel(LOG_LEVELS[loglevel])
