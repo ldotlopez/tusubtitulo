@@ -18,6 +18,20 @@
 # USA.
 
 
-from .api import API, Subtitle, SeriesNotFoundError, ParseError
+from .api import (
+    API,
+    Subtitle,
+    InvalidFilename,
+    SeriesNotFoundError,
+    NoSubtitlesFoundError,
+)
+from .parsers import ParseError
 
-__all__ = ["API", "Subtitle", "SeriesNotFoundError", "ParseError"]
+__all__ = [
+    "API",
+    "Subtitle",
+    "InvalidFilename",
+    "SeriesNotFoundError",
+    "NoSubtitlesFoundError",
+    "ParseError",
+]

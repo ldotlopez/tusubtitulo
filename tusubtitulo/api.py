@@ -21,25 +21,24 @@
 import dataclasses
 import difflib
 import logging
-import os.path
-import re
-import sys
-import urllib
+import urllib.request
 
 
 import bs4
 import guessit
 
-def distance(a, b):
-    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+from . import parsers
 
 
 class API:
-    SHOW_INDEX = "https://www.tusubtitulo.com/series.php"
-    SEASON_INFO = "https://www.tusubtitulo.com/ajax_loadShow.php?show=%(series_id)s&season=%(season)s"
+    ROOT_URL = "https://www.tusubtitulo.com/"
+    SHOW_INDEX = ROOT_URL + "series.php"
+    SEASON_INFO = (
+        ROOT_URL + "ajax_loadShow.php?show=%(series_id)s&season=%(season)s"
+    )
 
     def __init__(self, logger=None):
-        self.logger = logger or logging.getLogger('tusubtitulo')
+        self.logger = logger or logging.getLogger("tusubtitulo")
         self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; WOW64) "
@@ -48,30 +47,15 @@ class API:
             ),
             "Accept-Language": "en, en-gb;q=0.9, en-us;q=0.9",
             "Accept-Charset": "utf-8, iso-8859-1;q=0.5",
-            "Referer": "",
         }
 
-    def search(self, filepath, language):
-        info = guessit.guessit(filepath)
-
-        if info.get("type") != "episode":
-            excmsg = "Detected file type is: %(type)s, expected 'episode'"
-            excmsg = excmsg % dict(type=info.get("type", "unknow"))
-            raise InvalidFile(excmsg)
-
-        for req in ["title", "season", "episode"]:
-            if not info.get(req, ""):
-                excmsg = "Missing required info for '%(field)'"
-                excmsg = excmsg % dict(field=req)
-                raise InvalidFile(excmsg)
-
-        subtitles = self.get_subtitles_info(info["title"], info["season"], info["episode"])
-        subtitles = [x for x in subtitles if x.language == language]
-        subtitles = list(reversed(sorted(subtitles, key=lambda x: distance(x.version, filepath))))
-
-        return subtitles[0]
-
-    def get_subtitles_info(self, series: str, season: int, number: int = None):
+    def search(
+        self,
+        series: str,
+        season: int,
+        number: int = None,
+        language: str = None,
+    ):
         series_id = self.get_series_id(series)
         subtitles = [
             Subtitle(
@@ -85,38 +69,94 @@ class API:
             )
             for x in self.get_season_info(series_id, season)
         ]
+
         if number:
             subtitles = [x for x in subtitles if x.number == number]
 
+        if language:
+            subtitles = [x for x in subtitles if x.language == language]
+
         return subtitles
 
-    def get_series_id(self, show: str):
-        buff = self.request(self.SHOW_INDEX)
-        data = self.parse_series_index(buff)
+    def search_from_filename(self, filepath, language):
+        info = guessit.guessit(filepath)
+
+        if info.get("type") != "episode":
+            excmsg = "Detected file type is: %(type)s, expected 'episode'"
+            excmsg = excmsg % dict(type=info.get("type", "unknow"))
+            raise InvalidFilename(excmsg)
+
+        for req in ["title", "season", "episode"]:
+            if not info.get(req, ""):
+                excmsg = "Missing required info for '%(field)s'"
+                excmsg = excmsg % dict(field=req)
+                raise InvalidFilename(excmsg)
+
+        subtitles = self.search(
+            info["title"], info["season"], info["episode"], language=language
+        )
+        if not subtitles:
+            raise NoSubtitlesFoundError()
+
+        subtitles = list(
+            reversed(
+                sorted(subtitles, key=lambda x: distance(x.version, filepath))
+            )
+        )
+
+        return subtitles
+
+    def download(self, subtitle):
+        referer = self.SEASON_INFO % dict(
+            series_id=subtitle.series_id, season=subtitle.season
+        )
+        buff = self.request(subtitle.url, referer=referer)
+        return buff
+
+    def get_series_id(self, series: str):
+        buff = self.request(self.SHOW_INDEX, referer=self.ROOT_URL)
+        data = parsers.series_index(buff)
+
+        msg = "Got %(n_items)s series from index"
+        msg = msg % dict(n_items=len(data))
+        self.logger.debug(msg)
 
         # Return exact match
         try:
-            return data[show]
+            ret = data[series]
+            msg = "Got exact match for %(series)s"
+            msg = msg % dict(series=series)
+            self.logger.debug(msg)
+            return ret
         except KeyError:
             pass
 
         # Return lowercase match
         try:
-            return {k.lower(): v for (k, v) in data.items()}[show.lower()]
+            ret = {k.lower(): v for (k, v) in data.items()}[series.lower()]
+
+            msg = "Got case-independent match for %(series)s"
+            msg = msg % dict(series=series)
+            self.logger.debug(msg)
+
+            return ret
+
         except KeyError:
             pass
 
         # Return by string-distance
-        ratios = [
-            (
-                key,
-                distance(show.lower(), key.lower())
-            )
-            for key in data
-        ]
+        ratios = [(key, distance(series.lower(), key.lower())) for key in data]
         ratios = list(reversed(sorted(ratios, key=lambda x: x[1])))
 
         if ratios[0][1] > 0.8:
+            msg = (
+                "Got aproximated match for %(series)s: %(match)s "
+                "(q=%(ratio)s)"
+            )
+            msg = msg % dict(
+                series=series, match=ratios[0][0], ratio=ratios[0][1]
+            )
+            self.logger.debug(msg)
             return data[ratios[0][0]]
 
         raise SeriesNotFoundError()
@@ -125,96 +165,37 @@ class API:
         url = self.SEASON_INFO % dict(
             series_id=str(series_id), season=str(season)
         )
-        buff = self.request(url)
-        return self.parse_season_info(buff)
+        buff = self.request(url, referer=self.SHOW_INDEX)
+        data = parsers.season_index(buff)
 
-    def parse_series_index(self, buff):
-        soup = self._soupify(buff)
-        return {
-            x.text: x.attrs["href"].split("/")[-1]
-            for x in soup.select("a")
-            if x.attrs.get("href", "").startswith("/show/")
-        }
+        msg = (
+            "Got %(n_items)s for series id '%(series_id)s' "
+            "and season %(season)s"
+        )
+        msg = msg % dict(n_items=len(data), series_id=series_id, season=season)
 
-    def parse_season_info(self, buff):
-        lang_codes = {
-            "english": "en-us",
-            "english (us)": "en-us",
-            "español": "es-es",
-            "español (españa)": "es-es",
-            "español (latinoamérica)": "es-lat",
-            "català": "es-ca",
-            "galego": "es-gl",
-            "brazilian": "pt-br",
-        }
+        return data
 
-        def _find_episode_block(x):
-            while True:
-                if x.parent is None:
-                    raise ValueError()
+    def request(self, url, referer=None):
+        headers = {}
+        headers.update(self.headers)
+        if referer:
+            headers.update({"Referer": referer})
 
-                if x.name == "table":
-                    return x
+        return self._request(url, headers)
 
-                x = x.parent
-
-        def _get_episode_number(x):
-            m = re.search(
-                r"/episodes/\d+/.+?-\d+x(\d+)", x.attrs.get("href", "")
-            )
-            if not m:
-                raise ValueError()
-
-            return int(m.group(1))
-
-        soup = self._soupify(buff)
-        blocks = [
-            (_get_episode_number(x), _find_episode_block(x))
-            for x in soup.select('a[href*="/episodes/"]')
-        ]
-
-        ret = []
-        for (ep_number, el) in blocks:
-            version_g = (x for x in range(sys.maxsize))
-            cur_version = None
-            cur_lang = None
-            cur_link = None
-
-            for line in el.select("tr"):
-                # Get version
-                m = re.search(r"Versi.+?n(.+)?", line.text, re.IGNORECASE)
-                if m:
-                    cur_version = m.group(1).strip() or (
-                        "ver-%s" % next(version_g)
-                    )
-
-                # Match language
-                language = line.select_one("td.language")
-                if language:
-                    try:
-                        cur_lang = lang_codes[language.text.strip().lower()]
-                    except KeyError:
-                        continue  # Log
-
-                # Match download link
-                link = line.select_one("a")
-                if language and link:
-                    cur_link = link.attrs["href"]
-                    ret.append(
-                        (ep_number, cur_version, cur_lang, "http:" + cur_link)
-                    )
-
-        return ret
-
-    def request(self, url):
-        ret = self._request(url)
-        self.headers["Referer"] = url
-        return ret
-
-    def _request(self, url):
-        req = urllib.request.Request(url, headers=self.headers)
+    def _request(self, url, headers=None):
+        req = urllib.request.Request(url, headers=headers or {})
         with urllib.request.urlopen(req) as fh:
-            return fh.read()
+            buff = fh.read()
+
+        msg = "Request '%(url)s got %(bytes)s bytes' (referer: %(referer)s)"
+        msg = msg % dict(
+            url=url, bytes=len(buff), referer=headers.get("Referer", "")
+        )
+        self.logger.debug(msg)
+
+        return buff
 
     def _soupify(self, buff):
         return bs4.BeautifulSoup(buff, features="html.parser")
@@ -231,8 +212,21 @@ class Subtitle:
     url: str
 
 
+def distance(a, b):
+    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
 class SeriesNotFoundError(Exception):
     pass
 
-class ParseError(Exception):
+
+class EpisodeNotFoundError(Exception):
+    pass
+
+
+class NoSubtitlesFoundError(Exception):
+    pass
+
+
+class InvalidFilename(Exception):
     pass

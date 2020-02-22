@@ -22,12 +22,17 @@
 import unittest
 from unittest.mock import patch
 
-
 import os.path
 import re
 
 
-from tusubtitulo import API, Subtitle, SeriesNotFoundError
+from tusubtitulo import API, SeriesNotFoundError
+from tusubtitulo.parsers import (
+    series_index as parse_series_index,
+    season_index as parse_season_index,
+    ParseError,
+)
+from tusubtitulo.cli import subtitle_filename
 
 
 def sample_path(samplename):
@@ -43,89 +48,159 @@ def read_sample(samplename):
         return fh.read()
 
 
-class PatchedAPI(API):
-    def _request(self, url):
-        if url == self.SHOW_INDEX:
-            return read_sample("series-index.html")
+def request_patch(url, headers=None):
+    # print("=> %s (from: %s)" % (url, headers["Referer"]))
+    if url == API.SHOW_INDEX:
+        return read_sample("series-index.html")
 
-        m = re.search(r"/ajax_loadShow.php\?show=(\d+)&season=(\d+)", url)
-        if m:
-            sample = "series-%s-season-%s.html" % (m.group(1), m.group(2))
-            return read_sample(sample)
+    m = re.search(r"/ajax_loadShow.php\?show=(\d+)&season=(\d+)", url)
+    if m:
+        sample = "series-%s-season-%s.html" % (m.group(1), m.group(2))
+        return read_sample(sample)
 
-        raise ValueError(url)
+    if "tusubtitulo.com/updated" in url:
+        return b"foo"
+
+    raise ValueError(url)
 
 
-class TuSubtituloTest(unittest.TestCase):
+class ParsersTest(unittest.TestCase):
     def test_parse_index(self):
-        api = PatchedAPI()
-        ret = api.parse_series_index(read_sample("series-index.html"))
+        ret = parse_series_index(read_sample("series-index.html"))
         self.assertEqual(len(ret), 2220)
 
-    def test_missing_show(self):
-        api = PatchedAPI()
-        with self.assertRaises(SeriesNotFoundError):
-            api.get_series_id('AbCdEfGhIjK')
+    def test_parse_index_error(self):
+        with self.assertRaises(ParseError):
+            parse_series_index("afasdfasdfasd")
 
-    def test_exact_show(self):
-        api = PatchedAPI()
-        self.assertEqual(api.get_series_id("Black Mirror"), "1168")
-
-    def test_lowercase_show(self):
-        api = PatchedAPI()
-        self.assertEqual(api.get_series_id("black mirror"), "1168")
-
-    def test_dashed_show(self):
-        api = PatchedAPI()
-        self.assertEqual(api.get_series_id("black-mirror"), "1168")
-
-    def test_aproximated_show(self):
-        api = PatchedAPI()
-        self.assertEqual(api.get_series_id("black-miror"), "1168")
-
-    def test_season_info(self):
+    def test_parse_season(self):
         samples = [
             ("90", 6, 168),
             ("1093", 5, 51),
         ]
+        for (series_id, season, expected) in samples:
+            ret = parse_season_index(
+                read_sample("series-%s-season-%d.html" % (series_id, season))
+            )
+            self.assertEqual(len(ret), expected)
 
-        api = PatchedAPI()
-        for (series_id, season, n_subs) in samples:
-            ret = api.get_season_info(series_id, season)
-            self.assertEqual(len(ret), n_subs)
 
-    def test_get_subtitle_info(self):
-        api = PatchedAPI()
+class TuSubtituloTest(unittest.TestCase):
+    def test_exact_show(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch) as mock:
+            self.assertEqual(api.get_series_id("Black Mirror"), "1168")
+            self.assertMockCalls(
+                mock,
+                [
+                    (
+                        "https://www.tusubtitulo.com/series.php",
+                        "https://www.tusubtitulo.com/",
+                    )
+                ],
+            )
 
-        season_subs = api.get_subtitles_info("lost", 6)
-        self.assertEqual(len(season_subs), 168)
+    def test_lowercase_show(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch):
+            self.assertEqual(api.get_series_id("black mirror"), "1168")
 
-        season_subs = api.get_subtitles_info("lost", 6, 2)
-        self.assertEqual(len(season_subs), 13)
+    def test_dashed_show(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch):
+            self.assertEqual(api.get_series_id("black-mirror"), "1168")
 
-    def test_get_from_filename(self):
-        api = PatchedAPI()
-        sub = api.search("lost.s06e02.mkv", "es-es")
+    def test_aproximated_show(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch):
+            self.assertEqual(api.get_series_id("black-miror"), "1168")
+
+    def test_missing_show(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch):
+            with self.assertRaises(SeriesNotFoundError):
+                api.get_series_id("AbCdEfGhIjK")
+
+    def test_search(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch) as mock:
+            subs = api.search("lost", 6)
+            self.assertEqual(len(subs), 168)
+            self.assertMockCalls(
+                mock,
+                [
+                    (
+                        "https://www.tusubtitulo.com/series.php",
+                        "https://www.tusubtitulo.com/",
+                    ),
+                    (
+                        "https://www.tusubtitulo.com/ajax_loadShow.php?show=90&season=6",
+                        "https://www.tusubtitulo.com/series.php",
+                    ),
+                ],
+            )
+
+    def test_search_from_filename(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch) as mock:
+            sub = api.search_from_filename(
+                "lost.s06e07.720p.CTU.mkv", language="es-es"
+            )
+            self.assertMockCalls(
+                mock,
+                [
+                    (
+                        "https://www.tusubtitulo.com/series.php",
+                        "https://www.tusubtitulo.com/",
+                    ),
+                    (
+                        "https://www.tusubtitulo.com/ajax_loadShow.php?show=90&season=6",
+                        "https://www.tusubtitulo.com/series.php",
+                    ),
+                ],
+            )
+
+    def test_download(self):
+        api = API()
+        with patch.object(api, "_request", side_effect=request_patch) as mock:
+            sub = api.search_from_filename(
+                "lost.s06e07.720p.CTU.mkv", language="es-es"
+            )[0]
+
         self.assertEqual(
-            sub,
-            Subtitle(
-                series="lost",
-                series_id="90",
-                season=6,
-                number=2,
-                version="720p.hdtv.x264-lostf",
-                language="es-es",
-                url="http://www.tusubtitulo.com/updated/5/8588/3",
-            ),
+            sub.url, "http://www.tusubtitulo.com/updated/4/9227/2"
+        )
+        with patch.object(api, "_request", side_effect=request_patch) as mock:
+            buff = api.download(sub)
+            self.assertEqual(buff, b"foo")
+            self.assertMockCalls(
+                mock,
+                [
+                    (
+                        "http://www.tusubtitulo.com/updated/4/9227/2",
+                        "https://www.tusubtitulo.com/ajax_loadShow.php?show=90&season=6",
+                    )
+                ],
+            )
+
+    def assertMockCalls(self, mock, trace):
+        self.assertEqual(len(trace), len(mock.call_args_list))
+
+        for (trace_step, call_args) in zip(trace, mock.call_args_list):
+            trace_url, trace_referer = trace_step
+            call_url, call_headers = call_args[0]
+
+            self.assertEqual(trace_url, call_url)
+            self.assertEqual(trace_referer, call_headers["Referer"])
+
+
+class CLITest(unittest.TestCase):
+    def test_subtitle_filename(self):
+        self.assertEqual(
+            subtitle_filename("lost.s01.e02.mkv", language="es-es"),
+            "lost.s01.e02.es-es.srt",
         )
 
-    def test_get_from_filename_and_version(self):
-        api = PatchedAPI()
-        sub = api.search("lost.s06e07.720p.CTU.mkv", "es-es")
-        self.assertEqual(
-            sub,
-            Subtitle(series='lost', series_id='90', season=6, number=7, version='Version 720p CTU', language='es-es', url='http://www.tusubtitulo.com/updated/4/9227/2')
-        )
 
 if __name__ == "__main__":
     unittest.main()
