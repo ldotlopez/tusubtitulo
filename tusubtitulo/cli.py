@@ -150,8 +150,11 @@ def main(argv=None):
         for lang in args.languages:
             output = subtitle_filename(f, lang)
             if os.path.exists(output) and not args.overwrite:
-                msg = "Destination filename '%(output)s' already exists, skip"
-                msg = msg % dict(output=output)
+                msg = (
+                    "%(filename)s: Destination filename '%(output)s' already "
+                    "exists, skip"
+                )
+                msg = msg % dict(filename=f, output=output)
                 logger.error(msg)
                 continue
 
@@ -159,15 +162,21 @@ def main(argv=None):
                 subs = api.search_from_filename(f, language=lang)
 
             except tusubtitulo.InvalidFilename as e:
-                msg = "Invalid filename %(filename)s: %(error)s"
+                msg = "%(filename)s: Invalid filename (%(error)s)"
                 msg = msg % dict(filename=f, error=e)
+                logger.error(msg)
+                break
+
+            except tusubtitulo.SeriesNotFoundError:
+                msg = "%(filename)s: Series not found"
+                msg = msg % dict(filename=f)
                 logger.error(msg)
                 break
 
             except tusubtitulo.NoSubtitlesFoundError:
                 msg = (
-                    "No subtitles found for %(filename)s "
-                    "in language %(language)s"
+                    "%(filename)s: No subtitles found for language "
+                    "%(language)s"
                 )
                 msg = msg % dict(filename=f, language=lang)
                 logger.error(msg)
@@ -176,6 +185,13 @@ def main(argv=None):
             buff = api.download(subs[0])
             with open(output, "wb") as fh:
                 fh.write(buff)
+
+            msg = (
+                "%(filename)s: subtitles for %(language)s saved to "
+                "%(output)s"
+            )
+            msg = dict(filename=f, output=output)
+            logger.info(msg)
 
 
 def subtitle_filename(f, language):
